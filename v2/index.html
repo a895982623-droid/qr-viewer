@@ -76,6 +76,9 @@ body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;backgr
 .form-field{margin-bottom:12px}
 .form-field label{display:block;font-size:13px;color:#555;margin-bottom:4px;font-weight:500}
 .form-field input,.form-field textarea,.form-field select{width:100%;padding:10px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px;font-family:inherit;background:#fafafa}
+.form-field.hrow{display:flex;align-items:center;gap:10px}
+.form-field.hrow label{margin-bottom:0;flex:none;white-space:nowrap}
+.form-field.hrow input{flex:1;width:auto;min-width:0}
 .form-field textarea{min-height:80px;resize:vertical}
 .form-field input:focus,.form-field textarea:focus,.form-field select:focus{outline:none;border-color:#667eea;background:#fff}
 .form-submit{width:100%;padding:12px;background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;margin-top:6px}
@@ -278,7 +281,7 @@ body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;backgr
 
   // PDF 在线查看器（pdf.js，部署在同仓库 pdfjs/ 目录）
   function pdfViewerUrl(u) {
-    return '../pdfjs/web/viewer.html?file=' + encodeURIComponent(u);
+    return 'pdfjs/web/viewer.html?file=' + encodeURIComponent(u);
   }
 
   function openFullscreen(imgEl, images, index, colors) {
@@ -731,6 +734,9 @@ body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;backgr
         var th = renderTextBlock(item);
         nonImageBuffer.push(th);
       }
+      else if (type === 'kv') {
+        nonImageBuffer.push(renderKvBlock(item));
+      }
       else if (type === 'form') {
         var fh = renderFormBlock(item);
         nonImageBuffer.push(fh);
@@ -856,6 +862,21 @@ body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;backgr
     return '<div style="' + wrapStyle + '"><p style="' + pStyle + ';white-space:pre-wrap;word-break:break-word;margin:0">' + content + '</p></div>';
   }
 
+  // 渲染信息行（名称灰小字 + 内容粗体，检测报告样式）
+  function renderKvBlock(item) {
+    var rows = item.rows || [];
+    var h = '<div style="max-width:700px;margin:0 auto;padding:0 16px 12px">';
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i];
+      h += '<div style="padding:10px 0;border-bottom:1px solid #eee">';
+      h += '<div style="font-size:13px;color:#999;margin-bottom:4px">' + escapeHtml(r.k || '') + '</div>';
+      h += '<div style="font-size:17px;font-weight:600;color:#222;word-break:break-word">' + escapeHtml(r.v || '') + '</div>';
+      h += '</div>';
+    }
+    h += '</div>';
+    return h;
+  }
+
   // 渲染表单块
   function renderFormBlock(item) {
     var fields = item.fields || [];
@@ -916,6 +937,26 @@ body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;backgr
   // 渲染单个表单字段（提取为独立函数，供多步骤复用）
   function renderFormField(f) {
     var ftype = f.type || 'text';
+    // 静态文字（说明文字，不是输入项）
+    if (ftype === 'note') {
+      var nst = f.style || {};
+      var np = 'font-size:' + (nst.fontSize || 14) + 'px;color:' + (nst.color || '#555') + ';line-height:1.7;margin:0;white-space:pre-wrap;word-break:break-word;';
+      if (nst.fontFamily) np += 'font-family:' + nst.fontFamily + ';';
+      return '<div class="form-field"><p style="' + np + '">' + escapeHtml(f.label || '').replace(/\n/g, '<br>') + '</p></div>';
+    }
+    // 单行输入类：标签和输入框同一行（如：姓名：____）
+    var SIMPLE = {text:1, tel:1, number:1, date:1, datetime:1, time:1, email:1, url:1};
+    if (SIMPLE[ftype] || (!f.options && ['textarea','select','radio','checkbox','rating','signature','file','image','cascader'].indexOf(ftype) < 0)) {
+      var sh = '<div class="form-field hrow"';
+      if (f.showIf) {
+        sh += ' data-show-if-field="' + escapeHtml(f.showIf.field) + '" data-show-if-value="' + escapeHtml(f.showIf.value) + '" style="display:none"';
+      }
+      sh += '>';
+      sh += '<label>' + escapeHtml(f.label) + (f.required ? ' *' : '') + '：</label>';
+      sh += '<input type="' + ftype + '" name="' + escapeHtml(f.label) + '" placeholder="' + escapeHtml(f.placeholder || '请输入') + '"' + (f.required ? ' required' : '') + '>';
+      sh += '</div>';
+      return sh;
+    }
     var h = '<div class="form-field"';
     // 条件显示
     if (f.showIf) {
