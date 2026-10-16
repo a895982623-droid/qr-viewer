@@ -279,9 +279,12 @@ body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;backgr
     return parts[0];
   }
 
-  // PDF 在线查看器（pdf.js，部署在同仓库 pdfjs/ 目录）
+  // PDF 在线查看器（pdf.js，部署在仓库根目录 pdfjs/）
+  // 本页可能在仓库根（定制客户）或 v2/ 下（主仓库），动态算根路径
   function pdfViewerUrl(u) {
-    return 'pdfjs/web/viewer.html?file=' + encodeURIComponent(u);
+    var base = location.pathname.replace(/[^\/]*$/, ''); // 去掉 index.html
+    base = base.replace(/v2\/$/, ''); // v2/ 下回到仓库根
+    return base + 'pdfjs/web/viewer.html?file=' + encodeURIComponent(u);
   }
 
   function openFullscreen(imgEl, images, index, colors) {
@@ -358,12 +361,13 @@ body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;backgr
     },
 
     // 单PDF
-    singlePdf: function(url, title) {
-      // pdf.js 内嵌查看器：扫码直接看，不用下载（底部留下载入口）
+    singlePdf: function(url, title, allowDl) {
+      // pdf.js 内嵌查看器：扫码直接看，不用下载
       var h = '<div style="position:fixed;inset:0;display:flex;flex-direction:column;background:#fff">';
       if (title) h += '<div style="flex:none;padding:10px 16px;font-size:16px;font-weight:600;color:#222;text-align:center;border-bottom:1px solid #eee">' + escapeHtml(title) + '</div>';
       h += '<iframe src="' + pdfViewerUrl(url) + '" style="flex:1;width:100%;border:0"></iframe>';
-      h += '<div style="flex:none;text-align:center;padding:6px;font-size:12px;border-top:1px solid #eee"><a href="' + url + '" target="_blank" style="color:#667eea;text-decoration:none">下载 PDF 到本地</a></div>';
+      // 下载按钮：客户可在生成时关闭（dl=0 则不显示）
+      if (allowDl !== false) h += '<div style="flex:none;text-align:center;padding:6px;font-size:12px;border-top:1px solid #eee"><a href="' + url + '" target="_blank" style="color:#667eea;text-decoration:none">下载 PDF 到本地</a></div>';
       h += '</div>';
       return h;
     },
@@ -717,7 +721,7 @@ body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;backgr
         if (item.caption) ph += '<div style="font-size:14px;font-weight:600;color:#333;padding:2px 2px 8px">' + escapeHtml(item.caption) + '</div>';
         ph += '<div style="border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.08);background:#fff">';
         ph += '<iframe src="' + pdfViewerUrl(item.url) + '" style="width:100%;height:65vh;border:0;display:block"></iframe>';
-        ph += '<a href="' + item.url + '" target="_blank" style="display:block;text-align:center;padding:8px;font-size:12px;color:#667eea;text-decoration:none;border-top:1px solid #f0f0f0">下载 PDF 到本地</a>';
+        if (item.dl !== false) ph += '<a href="' + item.url + '" target="_blank" style="display:block;text-align:center;padding:8px;font-size:12px;color:#667eea;text-decoration:none;border-top:1px solid #f0f0f0">下载 PDF 到本地</a>';
         ph += '</div></div>';
         nonImageBuffer.push(ph);
       }
@@ -1460,7 +1464,7 @@ body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;backgr
     } else if (type === 'audio') {
       h = Renderer.singleAudio(mediaUrl, title);
     } else if (type === 'pdf') {
-      h = Renderer.singlePdf(mediaUrl, title);
+      h = Renderer.singlePdf(mediaUrl, title, params.get('dl') !== '0');
     } else if (type === 'office') {
       // Office文件 → Microsoft Online Viewer
       var officeLink = 'https://view.officeapps.live.com/op/view.aspx?src=' + encodeURIComponent(mediaUrl);
@@ -1506,6 +1510,8 @@ body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;backgr
     var items = urls.map(function(u, i) {
       var it = {url: u};
       if (colors && colors[i]) it.bgColor = colors[i];
+      // PDF下载开关：dl=0 时隐藏下载按钮
+      if (params.get('dl') === '0') it.dl = false;
       return it;
     });
     var h = '';
