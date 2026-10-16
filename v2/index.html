@@ -284,7 +284,7 @@ body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;backgr
   function pdfViewerUrl(u) {
     var base = location.pathname.replace(/[^\/]*$/, ''); // 去掉 index.html
     base = base.replace(/v2\/$/, ''); // v2/ 下回到仓库根
-    return base + 'pdfjs/web/viewer.html?file=' + encodeURIComponent(u);
+    return base + 'pdfjs/web/viewer.html?file=' + encodeURIComponent(u) + '#zoom=page-width';
   }
 
   // 压平 pdf.js 查看器：隐藏工具栏/侧栏，页面按宽度铺满（同域 iframe，手机扫码体验）

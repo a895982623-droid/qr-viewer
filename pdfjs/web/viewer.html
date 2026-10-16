@@ -33,6 +33,17 @@ See https://github.com/adobe-type-tools/cmap-resources
 
     <link rel="stylesheet" href="viewer.css">
 
+<!-- QR Master 嵌入模式：隐藏全部工具条/侧栏，PDF 白底铺满，无需父页面注入 -->
+<style>
+  #sidebarContainer,#secondaryToolbar,#findbar,.toolbar,
+  #editorFreeTextParamsToolbar,#editorHighlightParamsToolbar,
+  #editorStampParamsToolbar,#editorInkParamsToolbar{display:none!important}
+  #viewerContainer{inset:0!important;background:#fff!important}
+  #outerContainer{padding:0!important}
+  #viewer{padding-bottom:8px!important}
+  .page{margin:0 auto 8px!important;border:none!important}
+</style>
+
   <script src="viewer.mjs" type="module"></script>
   </head>
 
