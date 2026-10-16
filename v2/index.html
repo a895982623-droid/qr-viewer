@@ -7,6 +7,8 @@
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;background:#f5f7fa;color:#333;-webkit-text-size-adjust:100%}
+/* 内容不满一屏时垂直居中，避免出现大片底部留白；内容超出一屏时正常从顶部滚动 */
+#app{min-height:100vh;display:flex;flex-direction:column;justify-content:center}
 .loading{display:flex;justify-content:center;align-items:center;min-height:100vh;font-size:15px;color:#999}
 .error{text-align:center;padding:40px 20px;color:#999}
 .error p{margin-bottom:12px}
@@ -321,7 +323,7 @@ body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;backgr
                 var h = vc.scrollHeight;
                 if (h > 100) {
                   var box = ifr.parentElement;
-                  if (box && box.style.position === 'fixed') { box.style.position = 'static'; box.style.display = 'block'; }
+                  if (box && box.style.position === 'fixed') { box.style.position = 'static'; box.style.display = 'block'; box.style.minHeight = '100vh'; }
                   ifr.style.flex = 'none';
                   ifr.style.display = 'block';
                   ifr.style.height = h + 'px';
