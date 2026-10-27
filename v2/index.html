@@ -2016,16 +2016,10 @@ body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;backgr
   //   放行 -> proceed(原始URL->签名URL 的映射)
   //   拒绝 -> 内部直接渲染提示页（fail-closed），不调用 proceed
   var _SIGN_MAP = {};
+  // 陈曦定制版：本桶为匿名直链、无 CDN 签名体系，签名闸门整体短路——不请求主站云函数，媒体全部直链放行（防串号）
   function mediaGate(urls, proceed) {
-    signMedia(urls || [], function(reason, map) {
-      if (!reason) { _SIGN_MAP = map || {}; proceed(_SIGN_MAP); return; }
-      if (reason === 'net' && SIGN_GRAY_FALLBACK) {   // 灰度兜底（上线后删除本分支）
-        _SIGN_MAP = {};
-        proceed(_SIGN_MAP);
-        return;
-      }
-      showGate(reason);
-    });
+    _SIGN_MAP = {};
+    proceed(_SIGN_MAP);
   }
 
   // ============ 活码模式 ============
