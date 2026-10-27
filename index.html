@@ -97,6 +97,13 @@ body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;backgr
 .single-audio .audio-icon{font-size:52px;margin-bottom:12px}
 .single-audio .audio-name{color:#333;font-size:16px;font-weight:600;margin-bottom:20px;word-break:break-all}
 .single-audio audio{width:100%;border-radius:8px}
+.audio-play-btn{background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:#fff;border:none;border-radius:50px;padding:14px 32px;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;margin:0 auto;min-width:160px;box-shadow:0 4px 15px rgba(102,126,234,.4);-webkit-tap-highlight-color:transparent}
+.audio-play-btn:active{transform:scale(.96)}
+.audio-play-btn .play-icon{font-size:18px}
+.audio-play-btn.playing{background:linear-gradient(135deg,#e74c3c 0%,#c0392b 100%)}
+.audio-progress{height:4px;background:rgba(0,0,0,.1);border-radius:2px;margin:16px 0 8px;overflow:hidden}
+.audio-progress-bar{height:100%;background:linear-gradient(90deg,#667eea,#764ba2);width:0%;transition:width .1s}
+.audio-time{font-size:13px;color:#666;margin-bottom:8px}
 .single-pdf{position:fixed;inset:0}
 .single-pdf iframe{width:100%;height:100%;border:none}
 .single-pdf-dl{position:fixed;left:0;right:0;bottom:0;z-index:5;text-align:center;padding:8px;background:rgba(255,255,255,.92);backdrop-filter:blur(8px);font-size:12px}
@@ -222,7 +229,7 @@ body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;backgr
   var params = new URLSearchParams(window.location.search);
   var app = document.getElementById('app');
 
-  // COS base (for live config)
+  // COS base (for live config) —— 陈曦定制版：指向陈曦桶 qrmedia-1505800238，防串号
   var COS_BASE = 'https://qrmedia-1505800238.cos.ap-guangzhou.myqcloud.com';
 
   // ============ 工具函数 ============
@@ -239,6 +246,9 @@ body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;backgr
     if (ext === 'json') return 'json';
     return 'other';
   }
+
+  // viewer 支持的条目类型白名单（用于兼容制作端写入的未知类型，如 'file'）
+  var KNOWN_ITEM_TYPES = {image:1,video:1,audio:1,pdf:1,office:1,text:1,kv:1,form:1,divider:1,spacer:1,countdown:1,viewCount:1,vcard:1,map:1,product:1,event:1,bizcard:1};
 
   function getFileName(url) {
     try {
@@ -265,20 +275,133 @@ body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;backgr
     return d.innerHTML;
   }
 
+  // ============ 音频播放控制 ============
+  function toggleAudioPlay(audioId) {
+    var audio = document.getElementById(audioId);
+    var btn = audio.parentElement.querySelector('.audio-play-btn');
+    var progressBar = audio.parentElement.querySelector('.audio-progress');
+    var progressBarFill = audio.parentElement.querySelector('.audio-progress-bar');
+    var timeDisplay = audio.parentElement.querySelector('.audio-time');
+    var playIcon = btn.querySelector('.play-icon');
+    var playText = btn.querySelector('.play-text');
+
+    if (audio.paused) {
+      audio.play().then(function() {
+        btn.classList.add('playing');
+        playIcon.innerHTML = '&#x23F8;';
+        playText.textContent = '暂停';
+        progressBar.style.display = 'block';
+        timeDisplay.style.display = 'block';
+      }).catch(function(e) {
+        // 播放失败（个别安卓微信X5内核限制）→ 降级为下载引导
+        btn.parentElement.innerHTML = audioFallbackHtml(audio.src);
+      });
+    } else {
+      audio.pause();
+      btn.classList.remove('playing');
+      playIcon.innerHTML = '&#x25B6;';
+      playText.textContent = '继续播放';
+    }
+
+    audio.ontimeupdate = function() {
+      if (audio.duration) {
+        var pct = (audio.currentTime / audio.duration) * 100;
+        progressBarFill.style.width = pct + '%';
+        var cur = formatTime(audio.currentTime);
+        var dur = formatTime(audio.duration);
+        timeDisplay.textContent = cur + ' / ' + dur;
+      }
+    };
+
+    audio.onended = function() {
+      btn.classList.remove('playing');
+      playIcon.innerHTML = '&#x25B6;';
+      playText.textContent = '重新播放';
+    };
+  }
+  window.toggleAudioPlay = toggleAudioPlay;
+
+  function formatTime(sec) {
+    var m = Math.floor(sec / 60);
+    var s = Math.floor(sec % 60);
+    return (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+  }
+
+  // ============ 音频播放辅助 ============
+  // 安卓微信（X5内核）渲染不了原生audio标签，统一走下载引导；其它环境用自定义播放器
+  function isAndroidWeChatEnv() {
+    return /MicroMessenger/.test(navigator.userAgent) && /Android/.test(navigator.userAgent);
+  }
+
+  function audioPlayerHtml(url) {
+    var audioId = 'audio_' + Math.random().toString(36).substr(2, 9);
+    return '<audio id="' + audioId + '" src="' + url + '" preload="metadata"></audio>' +
+      '<div style="text-align:center">' +
+      '<button class="audio-play-btn" onclick="toggleAudioPlay(\'' + audioId + '\')">' +
+        '<span class="play-icon">&#x25B6;</span><span class="play-text">点击播放</span>' +
+      '</button>' +
+      '<div class="audio-progress" style="display:none"><div class="audio-progress-bar"></div></div>' +
+      '<div class="audio-time" style="display:none">00:00 / 00:00</div>' +
+      '</div>';
+  }
+
+  // 播放失败时（个别安卓微信X5内核限制）降级为下载引导
+  function audioFallbackHtml(url) {
+    return '<div style="padding:14px;background:#f8f9fa;border-radius:12px;text-align:center">' +
+      '<a href="' + url + '" download style="display:inline-block;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:#fff;padding:10px 24px;border-radius:22px;text-decoration:none;font-size:14px;box-shadow:0 4px 12px rgba(102,126,234,.35)">下载后播放</a>' +
+      '<div style="font-size:11px;color:#999;margin-top:8px">当前浏览器不支持在线播放，或复制链接到系统浏览器打开</div>' +
+      '</div>';
+  }
+
   // ============ 全屏查看图片 ============
   var fsImages = [];
   var fsIndex = 0;
   var fsColors = [];
   var pageBg = ''; // 整页背景（全局色），点开放大时的兜底背景
 
-  // 颜色字符串 → CSS background 值（"a,b" = 渐变，"a" = 纯色）
+  // 颜色白名单：仅允许 #hex(3/4/6/8位) 或 rgba?(数字)。来自URL参数(?bg=/?colors=)的颜色
+  // 一律先过这里，不合法直接返回空串——堵死反射型XSS（S2/高-1）
+  var COLOR_RE = /^#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$|^rgba?\(\s*[\d.]+%?\s*,\s*[\d.]+%?\s*,\s*[\d.]+%?\s*(?:,\s*[\d.]+\s*)?\)$/;
+  function safeColor(c) {
+    var s = String(c || '').trim();
+    return COLOR_RE.test(s) ? s : '';
+  }
+
+  // 源站域名自动改写为CDN：老客户端生成的COS源站直链，播放时自动走CDN，避免外网下行流量费
+  // 仅精确匹配本桶源站域名，不影响定制客户自有域名与第三方链接
+  var _ORIGIN_RE = /https?:\/\/qr-audio-1482662045\.cos(?:-website)?\.ap-guangzhou\.myqcloud\.com/g;
+  function cdnify(u) {
+    return (typeof u === 'string' && u.indexOf('myqcloud.com') > -1) ? u.replace(_ORIGIN_RE, COS_BASE) : u;
+  }
+  function deepCdnify(o) {
+    if (typeof o === 'string') return cdnify(o);
+    if (Array.isArray(o)) { for (var _i = 0; _i < o.length; _i++) o[_i] = deepCdnify(o[_i]); return o; }
+    if (o && typeof o === 'object') { for (var _k in o) { if (Object.prototype.hasOwnProperty.call(o, _k)) o[_k] = deepCdnify(o[_k]); } return o; }
+    return o;
+  }
+
+  // URL净化：仅 http(s) 协议，拒绝引号/尖括号/空格——堵死 ?url= 属性逃逸（S3）
+  function safeUrl(u) {
+    var s = String(u || '').trim();
+    if (!/^https?:\/\//i.test(s)) return '';
+    if (/["'<>\s]/.test(s)) return '';
+    return cdnify(s);
+  }
+
+  // 颜色字符串 → CSS background 值（"a,b" = 渐变，"a" = 纯色）；非法色返回空
+  // 注意顺序：先整体验色（rgba(102,126,234) 自带逗号，不能先split），再试渐变
   function colorCss(c) {
     if (!c) return '';
-    var parts = String(c).split(',');
+    var s = String(c);
+    var whole = safeColor(s);
+    if (whole) return whole;
+    var parts = s.split(',');
     if (parts.length > 1 && parts[1] && parts[0] !== parts[1]) {
-      return 'linear-gradient(135deg,' + parts[0] + ',' + parts[1] + ')';
+      var ga = safeColor(parts[0]), gb2 = safeColor(parts[1]);
+      if (!ga || !gb2) return '';
+      return 'linear-gradient(135deg,' + ga + ',' + gb2 + ')';
     }
-    return parts[0];
+    return '';
   }
 
   // PDF 在线查看器（pdf.js，部署在仓库根目录 pdfjs/）
@@ -290,9 +413,93 @@ body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;backgr
   }
 
   // 压平 pdf.js 查看器：隐藏工具栏/侧栏，页面按宽度铺满（同域 iframe，手机扫码体验）
+  // 同时注入缩放控件（＋/−/重置），浮动在 PDF 右下角
+  var _pdfZoomLevel = 1.0; // 当前缩放倍数（1.0 = page-width）
+  function setPdfZoom(delta) {
+    _pdfZoomLevel = Math.max(0.25, Math.min(5, _pdfZoomLevel + delta));
+    var iframes = document.querySelectorAll('iframe[src*="pdfjs/web/viewer.html"]');
+    iframes.forEach(function(ifr) {
+      try {
+        var w = ifr.contentWindow;
+        if (w && w.PDFViewerApplication && w.PDFViewerApplication.pdfViewer) {
+          w.PDFViewerApplication.pdfViewer.currentScale = _pdfZoomLevel;
+        }
+      } catch (e) {}
+    });
+    // 更新按钮状态
+    var zi = document.getElementById('pdfZoomIn');
+    var zo = document.getElementById('pdfZoomOut');
+    if (zi) zi.style.opacity = _pdfZoomLevel >= 5 ? '0.35' : '1';
+    if (zo) zo.style.opacity = _pdfZoomLevel <= 0.25 ? '0.35' : '1';
+    // 缩放后重新计算 autoHeight
+    setTimeout(function() {
+      iframes.forEach(function(ifr) {
+        if (ifr.dataset.autoh) {
+          try {
+            var d = ifr.contentDocument;
+            if (d) {
+              var vc = d.getElementById('viewerContainer');
+              if (vc && vc.scrollHeight > 100) {
+                ifr.style.height = vc.scrollHeight + 'px';
+              }
+            }
+          } catch (e) {}
+        }
+      });
+    }, 500);
+  }
+  function resetPdfZoom() {
+    _pdfZoomLevel = 1.0;
+    var iframes = document.querySelectorAll('iframe[src*="pdfjs/web/viewer.html"]');
+    iframes.forEach(function(ifr) {
+      try {
+        var w = ifr.contentWindow;
+        if (w && w.PDFViewerApplication && w.PDFViewerApplication.pdfViewer) {
+          w.PDFViewerApplication.pdfViewer.currentScaleValue = 'page-width';
+        }
+      } catch (e) {}
+    });
+    var zi = document.getElementById('pdfZoomIn');
+    var zo = document.getElementById('pdfZoomOut');
+    if (zi) zi.style.opacity = '1';
+    if (zo) zo.style.opacity = '1';
+    setTimeout(function() {
+      iframes.forEach(function(ifr) {
+        if (ifr.dataset.autoh) {
+          try {
+            var d = ifr.contentDocument;
+            if (d) {
+              var vc = d.getElementById('viewerContainer');
+              if (vc && vc.scrollHeight > 100) {
+                ifr.style.height = vc.scrollHeight + 'px';
+              }
+            }
+          } catch (e) {}
+        }
+      });
+    }, 500);
+  }
+  function injectPdfZoomControls() {
+    if (document.getElementById('pdfZoomBox')) return;
+    var box = document.createElement('div');
+    box.id = 'pdfZoomBox';
+    box.style.cssText = 'position:fixed;right:14px;bottom:80px;z-index:9999;display:flex;flex-direction:column;gap:6px;opacity:0.85;transition:opacity .2s';
+    box.onmouseenter = function() { box.style.opacity = '1'; };
+    box.onmouseleave = function() { box.style.opacity = '0.7'; };
+    var btnStyle = 'width:38px;height:38px;border-radius:50%;border:0;background:rgba(30,30,30,0.72);color:#fff;font-size:20px;font-weight:700;display:flex;align-items:center;justify-content:center;cursor:pointer;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);box-shadow:0 2px 8px rgba(0,0,0,.18);user-select:none;-webkit-tap-highlight-color:transparent;line-height:1;padding:0';
+    box.innerHTML = '<button id="pdfZoomIn" style="' + btnStyle + '" title="放大">+</button>' +
+      '<button id="pdfZoomOut" style="' + btnStyle + '" title="缩小">−</button>' +
+      '<button id="pdfZoomReset" style="' + btnStyle + ';font-size:13px;font-weight:600" title="适应宽度"></button>';
+    document.body.appendChild(box);
+    document.getElementById('pdfZoomIn').onclick = function() { setPdfZoom(0.25); };
+    document.getElementById('pdfZoomOut').onclick = function() { setPdfZoom(-0.25); };
+    document.getElementById('pdfZoomReset').onclick = function() { resetPdfZoom(); };
+  }
+
   function flattenPdfFrames() {
     var iframes = document.querySelectorAll('iframe[src*="pdfjs/web/viewer.html"]');
     if (!iframes.length) return;
+    injectPdfZoomControls();
     iframes.forEach(function(ifr) {
       if (ifr.dataset.flat) return;
       ifr.dataset.flat = '1';
@@ -386,17 +593,15 @@ body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;backgr
   var Renderer = {
     // 单图片
     singleImage: function(url, title, bg) {
-      var h = '';
-      if (title) h += '<div class="page-title">' + escapeHtml(title) + '</div>';
-      h += '<div class="single-image"' + (bg ? ' style="background:' + colorCss(bg) + '"' : '') + '><img src="' + url + '" onclick="openFullscreen(this)" alt=""></div>';
-      return h;
+      // 标题只进微信顶栏(document.title)，不压在图片上
+      return '<div class="single-image"' + (bg ? ' style="background:' + colorCss(bg) + '"' : '') + '><img src="' + url + '" onclick="openFullscreen(this)" alt=""></div>';
     },
 
     // 单视频
     singleVideo: function(url, title) {
       var h = '';
       h += '<div class="single-video">';
-      h += '<video src="' + url + '" controls autoplay playsinline webkit-playsinline preload="metadata"></video>';
+      h += '<video src="' + url + '" controls playsinline webkit-playsinline preload="metadata"></video>';
       h += '</div>';
       return h;
     },
@@ -407,15 +612,16 @@ body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;backgr
       return '<div class="single-audio"><div class="audio-card">' +
         '<div class="audio-icon">&#x1F3B5;</div>' +
         '<div class="audio-name">' + escapeHtml(name) + '</div>' +
-        '<audio src="' + url + '" controls autoplay preload="metadata"></audio>' +
+        audioPlayerHtml(url) +
+        '<a href="' + url + '" download style="display:block;margin-top:12px;font-size:13px;color:#667eea">下载音频</a>' +
         '</div></div>';
     },
 
     // 单PDF
     singlePdf: function(url, title, allowDl) {
       // pdf.js 内嵌查看器：扫码直接看，不用下载
+      // 标题放微信顶栏(document.title)，不在PDF上方压一行大字
       var h = '<div style="position:fixed;inset:0;display:flex;flex-direction:column;background:#fff">';
-      if (title) h += '<div style="flex:none;padding:10px 16px;font-size:16px;font-weight:600;color:#222;text-align:center;border-bottom:1px solid #eee">' + escapeHtml(title) + '</div>';
       h += '<iframe src="' + pdfViewerUrl(url) + '" data-autoh="1" style="flex:1;width:100%;border:0"></iframe>';
       // 下载按钮：客户可在生成时关闭（dl=0 则不显示）
       if (allowDl !== false) h += '<div style="flex:none;text-align:center;padding:6px;font-size:12px;border-top:1px solid #eee"><a href="' + url + '" target="_blank" style="color:#667eea;text-decoration:none">下载 PDF 到本地</a></div>';
@@ -423,10 +629,9 @@ body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;backgr
       return h;
     },
 
-    // 多图画廊
+    // 多图画廊（标题只进微信顶栏）
     multiImage: function(items, title) {
       var h = '';
-      if (title) h += '<div class="page-title">' + escapeHtml(title) + '</div>';
       var n = items.length;
       var gc = n === 1 ? 'g-1' : n === 2 ? 'g-2' : n === 3 ? 'g-3' : n === 4 ? 'g-4' : 'g-many';
       h += '<div class="gallery ' + gc + '">';
@@ -445,10 +650,9 @@ body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;backgr
       return h;
     },
 
-    // 多视频
+    // 多视频（标题只进微信顶栏）
     multiVideo: function(items, title) {
       var h = '';
-      if (title) h += '<div class="page-title">' + escapeHtml(title) + '</div>';
       h += '<div class="video-list">';
       for (var i = 0; i < items.length; i++) {
         h += '<div class="video-item">';
@@ -460,17 +664,16 @@ body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;backgr
       return h;
     },
 
-    // 多音频
+    // 多音频（标题只进微信顶栏）
     multiAudio: function(items, title) {
       var h = '';
-      if (title) h += '<div class="page-title">' + escapeHtml(title) + '</div>';
       h += '<div class="audio-list">';
       for (var i = 0; i < items.length; i++) {
         h += '<div class="audio-item">';
         if (items[i].caption || items[i].title) {
           h += '<div class="audio-title">' + escapeHtml(items[i].caption || items[i].title) + '</div>';
         }
-        h += '<audio src="' + items[i].url + '" controls preload="metadata"></audio>';
+        h += audioPlayerHtml(items[i].url);
         h += '</div>';
       }
       h += '</div>';
@@ -479,8 +682,9 @@ body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;backgr
 
     // 文档列表
     docList: function(items, title) {
+      // 标题放微信顶栏(document.title)，不压在文档上
+      if (title) { try { document.title = title; } catch(e) {} }
       var h = '';
-      if (title) h += '<div class="page-title">' + escapeHtml(title) + '</div>';
       h += '<div class="doc-list">';
       for (var i = 0; i < items.length; i++) {
         var item = items[i];
@@ -550,46 +754,23 @@ body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;backgr
     }
   };
 
-  // 表单提交（截图上传方式，和现有逻辑一致）
+  // 表单收集已下架（制作端不再提供表单模块），存量码如实提示，不做假成功
   window.submitQRForm = function() {
-    var form = document.getElementById('qrForm');
-    var inputs = form.querySelectorAll('input,textarea,select');
-    var ok = true;
-    inputs.forEach(function(inp) {
-      if (inp.hasAttribute('required') && !inp.value.trim()) {
-        inp.style.borderColor = '#ff4444';
-        ok = false;
-      } else {
-        inp.style.borderColor = '#ddd';
-      }
-    });
-    if (!ok) { alert('请填写所有必填项'); return; }
-    // 禁用表单
-    inputs.forEach(function(inp) { inp.disabled = true; });
-    document.querySelector('.form-submit').disabled = true;
-    document.querySelector('.form-submit').textContent = '提交中...';
-    // 如果有html2canvas则截图提交
-    if (typeof html2canvas !== 'undefined') {
-      var card = document.querySelector('.form-card');
-      html2canvas(card, {backgroundColor:'#fff', scale:2, useCORS:true}).then(function(canvas) {
-        canvas.toBlob(function(blob) {
-          // 上传截图到COS（如果有配置）
-          document.getElementById('formSuccess').style.display = '';
-          document.querySelector('.form-submit').textContent = '已提交';
-        }, 'image/png');
-      }).catch(function() {
-        document.getElementById('formSuccess').style.display = '';
-        document.querySelector('.form-submit').textContent = '已提交';
-      });
-    } else {
-      document.getElementById('formSuccess').style.display = '';
-      document.querySelector('.form-submit').textContent = '已提交';
-    }
+    alert('该表单的收集功能已暂停，填写内容不会被保存，请直接联系发布者');
   };
 
-  // ============ 多步骤表单导航 ============
+  // ============ 多步骤表单导航（状态从DOM推导，不依赖注入的script——innerHTML里的script不执行） ============
+  function _formStepState() {
+    var contents = document.querySelectorAll('.step-content');
+    var cur = 0;
+    for (var i = 0; i < contents.length; i++) { if (contents[i].classList.contains('active')) { cur = i; break; } }
+    return { cur: cur, total: contents.length };
+  };
+
   window.formStepNext = function() {
-    if (typeof currentStep === 'undefined') return;
+    var st = _formStepState();
+    if (!st.total) return;
+    var currentStep = st.cur, totalSteps = st.total;
     // 验证当前步骤的必填字段
     var currentContent = document.getElementById('stepContent' + currentStep);
     var requiredInputs = currentContent.querySelectorAll('[required]');
@@ -601,13 +782,13 @@ body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;backgr
         return;
       }
     }
+    // 最后一步 = 提交
+    if (currentStep === totalSteps - 1) { submitQRForm(); return; }
     // 隐藏当前步骤
     document.getElementById('stepContent' + currentStep).classList.remove('active');
     document.getElementById('stepDot' + currentStep).classList.remove('active');
     document.getElementById('stepDot' + currentStep).classList.add('done');
-    if (currentStep < totalSteps - 1) {
-      document.getElementById('stepLine' + (currentStep + 1)).classList.add('done');
-    }
+    document.getElementById('stepLine' + (currentStep + 1)).classList.add('done');
     currentStep++;
     // 显示下一步骤
     document.getElementById('stepContent' + currentStep).classList.add('active');
@@ -622,7 +803,10 @@ body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;backgr
   };
 
   window.formStepPrev = function() {
-    if (typeof currentStep === 'undefined' || currentStep === 0) return;
+    var st = _formStepState();
+    if (!st.total) return;
+    var currentStep = st.cur, totalSteps = st.total;
+    if (currentStep === 0) return;
     document.getElementById('stepContent' + currentStep).classList.remove('active');
     document.getElementById('stepDot' + currentStep).classList.remove('active');
     currentStep--;
@@ -693,15 +877,34 @@ body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;backgr
   }
 
   function renderManifest(data) {
+    data = deepCdnify(deepSign(data, _SIGN_MAP));
     var h = '';
+    // 兼容：制作端可能写入 viewer 不识别的条目类型（如 'file'），按 URL 后缀统一纠正，
+    // 否则该条目会无分支命中而被静默丢弃，导致页面只剩标题、主体空白。
+    if (data.items) {
+      for (var _ni = 0; _ni < data.items.length; _ni++) {
+        var _it = data.items[_ni];
+        if (_it && _it.url && _it.type && !KNOWN_ITEM_TYPES[_it.type]) {
+          var _dt = detectType(_it.url);
+          if (_dt && _dt !== 'other') _it.type = _dt;
+        }
+      }
+    }
     var title = data.title || '';
+    // 微信顶栏同步显示标题
+    if (title) { try { document.title = title; } catch(e) {} }
     var titleStyle = data.titleStyle || {};
     var bg = data.bg || data.backgroundColor || '#f5f7fa';
-    document.body.style.background = colorCss(bg) || bg;
-    pageBg = bg;
+    var bgCss = colorCss(bg);
+    if (bgCss) document.body.style.background = bgCss;
+    pageBg = bgCss || '#f5f7fa';
 
     // 标题渲染（支持样式）
-    if (title) {
+    // 纯媒体/文档内容（全是图片/视频/音频/PDF/Office）不在页面上压标题——标题已在微信顶栏
+    var allDocs = data.items && data.items.length > 0 && data.items.every(function(it) {
+      return it.type === 'pdf' || it.type === 'office' || it.type === 'image' || it.type === 'video' || it.type === 'audio';
+    });
+    if (title && !allDocs) {
       var ts = 'text-align:' + (titleStyle.textAlign || 'center') + ';padding:20px 16px 8px;word-break:break-word;';
       if (titleStyle.fontSize) ts += 'font-size:' + titleStyle.fontSize + 'px;';
       else ts += 'font-size:20px;';
@@ -763,7 +966,7 @@ body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;backgr
         var ah = '<div class="audio-list" style="padding-bottom:8px">';
         ah += '<div class="audio-item" style="border-radius:' + (item.borderRadius || 14) + 'px">';
         if (item.caption || item.title) ah += '<div class="audio-title">' + escapeHtml(item.caption || item.title) + '</div>';
-        ah += '<audio src="' + item.url + '" controls preload="metadata" style="width:100%"></audio>';
+        ah += audioPlayerHtml(item.url);
         ah += '</div></div>';
         nonImageBuffer.push(ah);
       }
@@ -972,7 +1175,6 @@ body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;backgr
       h += '<button class="step-next" id="stepNext" onclick="formStepNext()">下一步</button>';
       h += '</div>';
       h += '<div class="form-success" id="formSuccess" style="display:none">提交成功!</div>';
-      h += '<script>var currentStep=0;var totalSteps=' + steps.length + ';<\/script>';
     } else {
       // 普通单步表单
       h += '<form id="qrForm" onsubmit="return false">';
@@ -1407,8 +1609,8 @@ body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;backgr
     h += '</div>';
     if (buyUrl || contactUrl) {
       h += '<div class="product-actions">';
-      if (contactUrl) h += '<button class="contact-btn" onclick="window.location.href=\'' + contactUrl + '\'">联系客服</button>';
-      if (buyUrl) h += '<button class="buy-btn" onclick="window.location.href=\'' + buyUrl + '\'">立即购买</button>';
+      if (contactUrl) h += '<button class="contact-btn" data-goto="' + escapeHtml(contactUrl) + '" onclick="window.location.href=this.getAttribute(\'data-goto\')">联系客服</button>';
+      if (buyUrl) h += '<button class="buy-btn" data-goto="' + escapeHtml(buyUrl) + '" onclick="window.location.href=this.getAttribute(\'data-goto\')">立即购买</button>';
       h += '</div>';
     }
     h += '</div>';
@@ -1436,10 +1638,12 @@ body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;backgr
     h += '</div>';
     if (desc) h += '<div class="event-desc">' + escapeHtml(desc).replace(/\n/g, '<br>') + '</div>';
 
-    // 倒计时（如果有日期）
+    // 倒计时（如果有日期；日期格式非法时跳过倒计时，不能让它炸掉整个渲染）
     if (date) {
-      var targetDate = new Date(date).toISOString();
-      h += renderCountdown({target: targetDate, title: '距离活动开始'});
+      var _d = new Date(date);
+      if (!isNaN(_d.getTime())) {
+        h += renderCountdown({target: _d.toISOString(), title: '距离活动开始'});
+      }
     }
 
     // 地图
@@ -1503,8 +1707,12 @@ body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;backgr
 
   // ============ 单文件渲染（向后兼容） ============
   function renderSingle(mediaUrl, forceType) {
+    if (Object.prototype.hasOwnProperty.call(_SIGN_MAP, mediaUrl)) mediaUrl = _SIGN_MAP[mediaUrl];
+    mediaUrl = cdnify(mediaUrl);
     var type = forceType || detectType(mediaUrl);
     var title = params.get('title') || '';
+    // 有标题就放到微信顶栏显示（原本固定显示 QR Master）
+    if (title) { try { document.title = title; } catch(e) {} }
     var bg = params.get('bg') || '';
     if (bg) { pageBg = bg; document.body.style.background = colorCss(bg); }
     var h = '';
@@ -1518,10 +1726,9 @@ body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;backgr
     } else if (type === 'pdf') {
       h = Renderer.singlePdf(mediaUrl, title, params.get('dl') !== '0');
     } else if (type === 'office') {
-      // Office文件 → Microsoft Online Viewer
+      // Office文件 → Microsoft Online Viewer（标题已在顶栏，不再压一行大字）
       var officeLink = 'https://view.officeapps.live.com/op/view.aspx?src=' + encodeURIComponent(mediaUrl);
       h = '<div class="doc-list" style="padding-top:40px">';
-      if (title) h += '<div class="page-title">' + escapeHtml(title) + '</div>';
       h += '<a class="doc-item" href="' + officeLink + '" target="_blank">';
       h += '<div class="doc-icon doc">&#x1F4C3;</div>';
       h += '<div class="doc-name">' + escapeHtml(getFileName(mediaUrl)) + '</div>';
@@ -1529,19 +1736,24 @@ body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;backgr
       h += '<div style="text-align:center;margin-top:16px"><a href="' + mediaUrl + '" style="color:#667eea;font-size:13px">下载原文件</a></div>';
       h += '</div>';
     } else if (type === 'html') {
-      // HTML页面 → fetch + document.write
-      app.innerHTML = '<div class="loading">加载中...</div>';
-      fetch(mediaUrl).then(function(r) {
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        return r.text();
-      }).then(function(htmlContent) {
-        document.open();
-        document.write(htmlContent);
-        document.close();
-      }).catch(function(err) {
-        // CORS失败 → 直接跳转到COS URL
+      // HTML页面：仅同源内容可内嵌渲染；外域一律跳转（地址栏可见真实域名，防官方域名钓鱼）
+      var sameOrigin = false;
+      try { sameOrigin = new URL(mediaUrl, location.href).origin === location.origin; } catch(e) {}
+      if (sameOrigin) {
+        app.innerHTML = '<div class="loading">加载中...</div>';
+        fetch(mediaUrl).then(function(r) {
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          return r.text();
+        }).then(function(htmlContent) {
+          document.open();
+          document.write(htmlContent);
+          document.close();
+        }).catch(function(err) {
+          window.location.href = mediaUrl;
+        });
+      } else {
         window.location.href = mediaUrl;
-      });
+      }
       return;
     } else {
       // 未知类型 → 文件卡片
@@ -1560,6 +1772,9 @@ body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;backgr
 
   // ============ 多URL渲染（简单多文件，无manifest） ============
   function renderMultiUrls(urls, type, title, colors) {
+    urls = (urls || []).map(function(u) {
+      return cdnify(Object.prototype.hasOwnProperty.call(_SIGN_MAP, u) ? _SIGN_MAP[u] : u);
+    });
     var items = urls.map(function(u, i) {
       var it = {url: u};
       if (colors && colors[i]) it.bgColor = colors[i];
@@ -1576,9 +1791,8 @@ body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;backgr
     } else if (type === 'audio') {
       h = Renderer.multiAudio(items, title);
     } else {
-      // 混合类型 → 逐个渲染
+      // 混合类型 → 逐个渲染（标题只进微信顶栏）
       h = '';
-      if (title) h += '<div class="page-title">' + escapeHtml(title) + '</div>';
       for (var i = 0; i < urls.length; i++) {
         var t = detectType(urls[i]);
         if (t === 'image') {
@@ -1586,7 +1800,7 @@ body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;backgr
         } else if (t === 'video') {
           h += '<div class="video-list"><div class="video-item"><video src="' + urls[i] + '" controls preload="metadata" playsinline></video></div></div>';
         } else if (t === 'audio') {
-          h += '<div class="audio-list"><div class="audio-item"><audio src="' + urls[i] + '" controls style="width:100%"></audio></div></div>';
+          h += '<div class="audio-list"><div class="audio-item">' + audioPlayerHtml(urls[i]) + '</div></div>';
         } else if (t === 'pdf') {
           h += '<div class="doc-list"><a class="doc-item" href="' + pdfViewerUrl(urls[i]) + '" target="_blank"><div class="doc-icon pdf">&#x1F4C4;</div><div class="doc-name">' + escapeHtml(getFileName(urls[i])) + '</div><div class="doc-arrow">&#x203A;</div></a></div>';
         }
@@ -1598,23 +1812,253 @@ body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;backgr
     flattenPdfFrames();
   }
 
+  // ============ 服务端媒体签名闸门（fail-closed） ============
+  // 改造前：客户端读 traffic/{cid}.js 判断余额，且"档案缺失/超时/404/跨域失败"一律放行（fail-open），
+  //         闸门形同虚设，任何人可直接抓原始媒体地址绕过。
+  // 改造后：媒体地址由服务端签发。"能不能看"完全由云函数 qrm-credential 的 action=sign 判定，
+  //         客户端拿不到签名密钥，绕过成本 = 拿不到可用的 URL。
+  //   请求：POST SIGN_API  body {action:'sign', cid, key, token}
+  //   成功：{"ok":true,"url":"https://qr.sznscc.cn/<key>?sign=<md5>&t=<ts>","expire":<unix秒>}
+  //   失败：{"ok":false,"reason":"no_balance"|"not_found"|"bad_cid"|"internal"}
+  //   签名有效期 300 秒；密钥只在服务端。
+  var SIGN_API = 'https://1482662045-c070lg2tst.ap-guangzhou.tencentscf.com';
+  var SIGN_TOKEN = 'QRM-9f3Kx7Qm2Zp4';
+  var SIGN_TIMEOUT = 6000;      // 单次请求超时(ms)
+  var SIGN_RETRY = 1;           // 失败重试次数（总尝试 = SIGN_RETRY + 1）
+  var SIGN_CONCURRENCY = 4;     // 并发签名数
+  var SIGN_CACHE = {};          // key -> {url, expire}  同一 key 300 秒内不重复签
+  // 根前缀 media/、audio/ 无 cid 归属。云函数对这两类前缀不校验 cid，但入口要求 cid 字段
+  // 非空且仅含 [0-9a-f-]（长度≤32），故传固定占位值；不会与真实 8 位 hex cid 冲突。
+  var LEGACY_CID = '0';
+  // ⚠️ 灰度开关（上线后必须删除本开关及所有引用分支）
+  //   用途：CDN 访问鉴权尚未开启、且服务端 action=sign 尚未上线期间，签名接口返回"不可识别响应"
+  //        （即服务端还没有 sign 分支）或网络不可达时，临时回退直连，避免全量二维码停摆。
+  //   为什么此刻开它是安全的：本页能正常加载，就证明 CDN 访问鉴权尚未开启，
+  //        此时媒体对象本来就可被任何人直连下载，闸门没有实际防护力，回退不降低安全性。
+  //        CDN 访问鉴权一旦开启，本页自身就需要签名才能加载 —— 即本分支天然失效。
+  //   默认 false = 严格 fail-closed：no_balance/not_found/bad_cid/internal/重试后仍失败 一律不放行。
+  //   服务端 sign 上线并验证通过后，必须改回 false 并重新部署；随后删除本开关。
+  var SIGN_GRAY_FALLBACK = false;
+
+  // 从任意形态的媒体 URL 取 COS 对象键；认两类前缀（都要参与签名闸门）：
+  //   1) c/{cid}/...     = 归属某客户、参与计量的内容
+  //   2) media/、audio/  = 老客户根前缀历史印刷码内容（无 cid 归属；云函数对根前缀直接签发、不计量）
+  // 其余路径（pages/*.json、qr-viewer/*、live/*.js、非本桶地址等）→ 返回 null → 不参与签名闸门
+  function mediaKey(u) {
+    if (typeof u !== 'string' || !/^https?:\/\//i.test(u)) return null;
+    var s = cdnify(u);
+    var m = /^https?:\/\/[^\/?#]+\/([^?#]*)/.exec(s);
+    if (!m) return null;
+    var key = m[1];
+    if (!key) return null;
+    if (/^c\/[0-9a-zA-Z]+\//.test(key)) return key;   // 归属客户、计量内容
+    if (/^(?:media|audio)\//.test(key)) return key;    // 老格式根前缀（历史印刷码，不计量）
+    return null;
+  }
+  function extractCid(u) {
+    // 不写死域名：按路径 /c/{cid}/ 提取，兼容COS源站、CDN自有域名、裸对象键及未来定制客户域名
+    var m = /(?:^|\/)c\/([0-9a-zA-Z]+)\//.exec(u || '');
+    return m ? m[1] : null;
+  }
+  function collectItemUrls(items) {
+    var out = [];
+    (items || []).forEach(function(it) {
+      if (!it) return;
+      if (it.url) out.push(it.url);
+      if (it.urls) out.push.apply(out, it.urls);
+    });
+    return out;
+  }
+  // 深度收集对象里所有"可签名"的媒体 URL（manifest / 活码 config 都走这里，避免漏签）
+  function collectSignableUrls(o, out) {
+    out = out || [];
+    if (typeof o === 'string') { if (mediaKey(o)) out.push(o); return out; }
+    if (Array.isArray(o)) { for (var i = 0; i < o.length; i++) collectSignableUrls(o[i], out); return out; }
+    if (o && typeof o === 'object') {
+      for (var k in o) { if (Object.prototype.hasOwnProperty.call(o, k)) collectSignableUrls(o[k], out); }
+      return out;
+    }
+    return out;
+  }
+  // 深度把原始 URL 换成签名 URL（只替换 map 里存在的键，其余原样）
+  function deepSign(o, map) {
+    if (typeof o === 'string') return Object.prototype.hasOwnProperty.call(map, o) ? map[o] : o;
+    if (Array.isArray(o)) { for (var i = 0; i < o.length; i++) o[i] = deepSign(o[i], map); return o; }
+    if (o && typeof o === 'object') {
+      for (var k in o) { if (Object.prototype.hasOwnProperty.call(o, k)) o[k] = deepSign(o[k], map); }
+      return o;
+    }
+    return o;
+  }
+  // 闸门拒绝页：按服务端 reason 给出明确文案，绝不放行媒体
+  function showGate(reason) {
+    app.className = 'error';
+    var head = '内容暂时无法查看';
+    var body;
+    if (reason === 'no_balance') {
+      body = '该二维码的展示流量已用完<br>请联系分享这个二维码给你的人';
+    } else if (reason === 'not_found') {
+      body = '内容不存在或尚未激活<br>请联系分享这个二维码给你的人';
+    } else if (reason === 'bad_cid') {
+      body = '该二维码尚未激活或授权已失效<br>请联系分享这个二维码给你的人';
+    } else {
+      body = '网络繁忙，请稍后再试<br>或联系分享这个二维码给你的人';
+    }
+    try { document.title = head; } catch (e) {}
+    app.innerHTML = '<div style="padding:70px 24px;text-align:center">' +
+      '<p style="font-size:17px;color:#333;font-weight:600;margin-bottom:10px">' + head + '</p>' +
+      '<p style="font-size:13px;color:#999;line-height:1.8">' + body + '</p>' +
+      '<div style="margin-top:22px"><button class="retry" onclick="location.reload()">重试</button></div></div>';
+  }
+  function showExpired() {
+    app.className = 'error';
+    try { document.title = '二维码已过有效期'; } catch (e) {}
+    app.innerHTML = '<div style="padding:40px 20px;text-align:center">' +
+      '<div style="font-size:48px;margin-bottom:16px">&#x23F0;</div>' +
+      '<p style="font-size:16px;color:#333;margin-bottom:8px">该二维码已过有效期</p>' +
+      '<p style="font-size:13px;color:#999">请联系内容提供方更新</p></div>';
+  }
+  // 统一有效期检查：任何模式（manifest/多URL/单URL/活码）带 exp 参数且已过期 → 失效页
+  var _expTs = +(params.get('exp') || 0);
+  if (_expTs && Date.now() / 1000 > _expTs) { showExpired(); return; }
+
+  // 单个 key 签名（带 300 秒缓存 + 有限重试；重试仍失败 -> cb('net')）
+  function signOne(cid, key, cb) {
+    var c = SIGN_CACHE[key];
+    if (c && c.url && c.expire - 30 > Date.now() / 1000) { cb(null, c.url); return; }
+    var attempt = 0;
+    var post = function() {
+      attempt++;
+      var done = false;
+      var timer = null;
+      var finish = function(err, url) {
+        if (done) return;
+        done = true;
+        if (timer) clearTimeout(timer);
+        if (err) {
+          if (err === 'net' && attempt <= SIGN_RETRY) { setTimeout(post, 400 * attempt); return; }
+          cb(err);
+          return;
+        }
+        SIGN_CACHE[key] = {url: url, expire: Date.now() / 1000 + 300};
+        cb(null, url);
+      };
+      var xhr = new XMLHttpRequest();
+      timer = setTimeout(function() { finish('net'); }, SIGN_TIMEOUT);
+      try {
+        xhr.open('POST', SIGN_API, true);
+        xhr.setRequestHeader('Content-Type', 'application/json');
+      } catch (e) { finish('net'); return; }
+      xhr.onreadystatechange = function() {
+        if (xhr.readyState !== 4) return;
+        var r = null;
+        try { r = JSON.parse(xhr.responseText); } catch (e2) { r = null; }
+        // 1) 契约响应：{ok:true,url:...} 或 {ok:false,reason:...}
+        if (r && typeof r.ok !== 'undefined') {
+          if (r.ok && r.url) { finish(null, r.url); return; }
+          finish(r.reason || 'internal');
+          return;
+        }
+        // 2) 非契约响应（服务端尚未上线 sign，或返回 {code:1,error:'bad cid'} 之类）
+        //    4xx = 服务端明确拒绝，不重试；error 提到 cid 的按 bad_cid 提示
+        var httpCode = xhr.status || 0;
+        if (httpCode >= 400 && httpCode < 500) {
+          var emsg = (r && (r.error || r.message)) || '';
+          finish(/cid/i.test(String(emsg)) ? 'bad_cid' : 'internal');
+          return;
+        }
+        finish('net');  // 网络层失败 / 5xx / 空响应 -> 可重试
+      };
+      xhr.onerror = function() { finish('net'); };
+      xhr.ontimeout = function() { finish('net'); };
+      try {
+        xhr.send(JSON.stringify({action: 'sign', cid: cid, key: key, token: SIGN_TOKEN}));
+      } catch (e3) { finish('net'); }
+    };
+    post();
+  }
+
+  // 批量签名：签所有闸门内媒体（c/{cid}/ 与根前缀 media//audio/）；非闸门内容不参与、直接放行
+  // cb(reason, map)：reason 非空 = 闸门拒绝（fail-closed，由调用方渲染提示页）
+  function signMedia(urls, cb) {
+    var jobs = [], seen = {};
+    for (var i = 0; i < (urls || []).length; i++) {
+      var raw = urls[i];
+      if (typeof raw !== 'string' || seen[raw]) continue;
+      seen[raw] = 1;
+      var key = mediaKey(raw);
+      if (!key) continue;                       // 非闸门内容（pages/*.json 等）-> 不参与闸门
+      var cid = extractCid(key) || LEGACY_CID;  // 根 media//audio/ 无 cid -> 传占位 cid（云函数对根前缀不校验 cid）
+      jobs.push({raw: raw, cid: cid, key: key});
+    }
+    if (!jobs.length) { cb(null, {}); return; }
+    var map = {}, idx = 0, active = 0, failed = null;
+    var pump = function() {
+      if (failed) return;
+      if (idx >= jobs.length && active === 0) { cb(null, map); return; }
+      while (!failed && active < SIGN_CONCURRENCY && idx < jobs.length) {
+        var job = jobs[idx++];
+        active++;
+        (function(j) {
+          signOne(j.cid, j.key, function(err, url) {
+            active--;
+            if (err) { if (!failed) { failed = err; cb(err, null); } return; }
+            map[j.raw] = url;
+            pump();
+          });
+        })(job);
+      }
+    };
+    pump();
+  }
+
+  // 闸门入口：mediaGate(urls, proceed)
+  //   放行 -> proceed(原始URL->签名URL 的映射)
+  //   拒绝 -> 内部直接渲染提示页（fail-closed），不调用 proceed
+  var _SIGN_MAP = {};
+  function mediaGate(urls, proceed) {
+    signMedia(urls || [], function(reason, map) {
+      if (!reason) { _SIGN_MAP = map || {}; proceed(_SIGN_MAP); return; }
+      if (reason === 'net' && SIGN_GRAY_FALLBACK) {   // 灰度兜底（上线后删除本分支）
+        _SIGN_MAP = {};
+        proceed(_SIGN_MAP);
+        return;
+      }
+      showGate(reason);
+    });
+  }
+
   // ============ 活码模式 ============
-  var liveId = params.get('live');
+  // 活码参数名用 code（COS/CDN 静态网站把 "live" 当作保留参数会返回 405）；
+  // 同时兼容旧链接上的 live 参数（github.io 老码仍在用）
+  var liveId = params.get('code') || params.get('live');
   if (liveId) {
-    var script = document.createElement('script');
-    script.src = COS_BASE + '/_live_config.js?t=' + Date.now();
-    script.onload = function() {
+    var triedGlobal = false;
+    var liveLoadTimer = null;
+    var renderLiveConfig = function() {
       if (typeof LIVE_CONFIG === 'undefined' || !LIVE_CONFIG[liveId]) {
+        // 拆分小文件里没有该id时，回退全局大配置再找一次（拆分上传失败/延迟的兜底）
+        if (!triedGlobal) { triedGlobal = true; loadGlobalConfig(); return; }
+        clearTimeout(liveLoadTimer);
         app.className = 'error';
         app.innerHTML = '<p>活码不存在或已被删除</p>';
         return;
       }
+      clearTimeout(liveLoadTimer);
       var config = LIVE_CONFIG[liveId];
+      // 活码标题放微信顶栏
+      if (config.title) { try { document.title = config.title; } catch(e) {} }
+      // 试用码过期检查（试用版生成的码到期失效）
+      if (config.expire && Date.now() / 1000 > config.expire) {
+        showExpired();
+        return;
+      }
       // 活码支持以下模式（优先级从高到低）：
       // 1. items字段 → 直接渲染组合/多媒体内容（无需fetch，微信兼容）
       // 2. url字段 → 单文件渲染（img/video/audio标签，不走CORS）
       // 3. manifest字段 → 旧版兼容（需fetch，可能微信不兼容）
       // 4. urls字段 → 旧版多URL
+      var _dispatchLive = function() {
       if (config.items && config.items.length > 0) {
         // 新格式：items直接存在config里，无需fetch（微信兼容）
         renderManifest({
@@ -1626,14 +2070,20 @@ body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;backgr
         });
       } else if (config.url) {
         // 单文件：COS直链，用img/video/audio标签渲染（不走CORS）
-        renderSingle(config.url, config.type || params.get('type'));
+        try {
+          renderSingle(config.url, config.type || params.get('type'));
+        } catch (e) {
+          app.className = 'error';
+          app.innerHTML = '<p>加载失败：' + escapeHtml(e.message) + '</p><button class="retry" onclick="location.reload()">重试</button>';
+        }
       } else if (config.manifest) {
         // 旧版兼容：manifest URL需要fetch（微信可能拦截）
-        fetch(config.manifest).then(function(r) {
+        fetch(cdnify(config.manifest)).then(function(r) {
           if (!r.ok) throw new Error('HTTP ' + r.status);
           return r.json();
         }).then(function(data) {
-          renderManifest(data);
+          // 先向服务端签名，拿到签名 URL 再渲染
+          mediaGate(collectSignableUrls(data), function() { renderManifest(data); });
         }).catch(function(err) {
           app.className = 'error';
           app.innerHTML = '<p>加载失败</p><button class="retry" onclick="location.reload()">重试</button>';
@@ -1647,23 +2097,50 @@ body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;backgr
         app.className = 'error';
         app.innerHTML = '<p>活码配置无效</p>';
       }
+      };
+      // 闸门：先向服务端签名，成功后才渲染（fail-closed）
+      var _gateUrls = config.items ? collectSignableUrls(config.items)
+        : (config.url ? [config.url]
+        : (config.urls || (config.manifest ? [config.manifest] : [])));
+      mediaGate(_gateUrls, _dispatchLive);
     };
-    script.onerror = function() {
+    // 优先按ID加载拆分的小配置文件（几KB，秒开）；不存在再回退全局大配置（兼容老码）
+    // 10秒无响应给重试入口（COS挂起时onerror不一定触发）
+    liveLoadTimer = setTimeout(function() {
       app.className = 'error';
-      app.innerHTML = '<p>加载失败，请检查网络</p><button class="retry" onclick="location.reload()">重试</button>';
+      app.innerHTML = '<p>加载超时，请检查网络</p><button class="retry" onclick="location.reload()">重试</button>';
+    }, 10000);
+    var loadGlobalConfig = function() {
+      var s2 = document.createElement('script');
+      s2.src = COS_BASE + '/_live_config.js?t=' + Date.now();
+      s2.onload = renderLiveConfig;
+      s2.onerror = function() {
+        clearTimeout(liveLoadTimer);
+        app.className = 'error';
+        app.innerHTML = '<p>加载失败，请检查网络</p><button class="retry" onclick="location.reload()">重试</button>';
+      };
+      document.head.appendChild(s2);
     };
+    var script = document.createElement('script');
+    script.src = COS_BASE + '/live/' + encodeURIComponent(liveId) + '.js?t=' + Date.now();
+    script.onload = renderLiveConfig;
+    script.onerror = loadGlobalConfig;
     document.head.appendChild(script);
     return;
   }
 
   // ============ Manifest 模式 ============
-  var manifestUrl = params.get('manifest');
+  var manifestUrl = cdnify(params.get('manifest'));
   if (manifestUrl) {
+    app.innerHTML = '<div class="loading">加载中...</div>';
     fetch(manifestUrl).then(function(r) {
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.json();
     }).then(function(data) {
-      renderManifest(data);
+      // manifest 自带 expire 字段（试用静态清单）→ 失效页
+      if (data && data.expire && Date.now() / 1000 > data.expire) { showExpired(); return; }
+      // 先向服务端签名，拿到签名 URL 再渲染（fail-closed）
+      mediaGate(collectSignableUrls(data), function() { renderManifest(data); });
     }).catch(function(err) {
       app.className = 'error';
       app.innerHTML = '<p>加载失败</p><p style="font-size:12px;color:#bbb">' + err.message + '</p><button class="retry" onclick="location.reload()">重试</button>';
@@ -1674,7 +2151,7 @@ body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;backgr
   // ============ 多URL模式（管道分隔） ============
   var multiUrls = params.get('urls');
   if (multiUrls) {
-    var urls = multiUrls.split('|');
+    var urls = multiUrls.split('|').map(safeUrl).filter(Boolean);
     var type = params.get('type') || 'auto';
     var title = params.get('title') || '';
     var bgParam = params.get('bg') || '';
@@ -1683,14 +2160,14 @@ body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;backgr
     if (type === 'auto' && urls.length > 0) {
       type = detectType(urls[0]); // 用第一个URL推断类型
     }
-    renderMultiUrls(urls, type, title, colorsParam);
+    mediaGate(urls, function() { renderMultiUrls(urls, type, title, colorsParam); });
     return;
   }
 
   // ============ 单URL模式（向后兼容） ============
-  var mediaUrl = params.get('url');
+  var mediaUrl = safeUrl(params.get('url'));
   if (mediaUrl) {
-    renderSingle(mediaUrl, params.get('type'));
+    mediaGate([mediaUrl], function() { renderSingle(mediaUrl, params.get('type')); });
     return;
   }
 
