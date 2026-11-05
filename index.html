@@ -4,8 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>QRMaster</title>
-<!-- 2026-11-06 域名迁移：老 github.io 入口自动跳转新域名（保留 query/hash） -->
-<script>location.replace('https://sbfwcxxt26.sznscc.cn/qr-viewer/index.html' + location.search + location.hash);</script>
+<!-- 2026-11-06 域名迁移：老 github.io 入口自动跳转新域名（保留 query/hash；live 参数改写为 code，CDN 把 live 当保留字会 405） -->
+<script>
+var q = location.search.replace(/([?&])live=/, '$1code=');
+location.replace('https://sbfwcxxt26.sznscc.cn/qr-viewer/index.html' + q + location.hash);
+</script>
 </head>
 <body style="font-family:sans-serif;text-align:center;padding-top:40vh;color:#666">
 正在打开…
